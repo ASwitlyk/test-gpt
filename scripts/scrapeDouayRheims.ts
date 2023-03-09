@@ -5,6 +5,7 @@ import fs from "fs";
 import { encode } from "gpt-3-encoder";
 
 const BASE_URL = "https://catechismclass.com/my_bible.php/";
+const HOME_PAGE_SUFFIX = "my_bible.php";
 const CHUNK_SIZE = 200;
 
 
@@ -49,63 +50,49 @@ const cheerioLoadWrapper = (html: string) => {
 }
 
 /**
- * create an asynchroneous function that returns an array of BibleBooks and their links
+ * create an asynchroneous function that returns an array of Parent Books and their links
  * from the catechismclass.com website
  */
-const getBookLinks = async () => {
-  const AxiosResponse = await axiosGetWrapper(BASE_URL);
+const getParentBookLinks = async () => {
+  const AxiosResponse = await axiosGetWrapper(BASE_URL + HOME_PAGE_SUFFIX);
   if (!AxiosResponse) return;
   const $ = cheerioLoadWrapper(AxiosResponse.data);
-  let $ul = $('ul.chapter');
-  let children = $ul.children();
-  let books = [];
-  children.map((i, child) => {
-    let book = [];
-    child.children.map((i, child) => {
-      // console.log(i);
-      i.children.map((i, child) => {
-        book.push(i.data)
-      });
-      book.push(i.attribs.href);
-      books.push(book);
-    });
+  let $ul = $('a.chapterTitle');
+
+  const linksArr: { url: string; title: string }[] = [];
+
+  $ul.map((i, child) => {
+    const linkObj = { url: child.attribs.href, title: child.firstChild.data };
+    linksArr.push(linkObj);
   });
-  console.log(books);
 
-  // let lists = $ul.children;
+  return linksArr;
+}
 
-  // console.log($ul);
-  // console.log(lists);
+/**
+ * create an asynchroneous function that returns the books and the links to thier chapters
+ */
+const getBookLinks = async (parentBooks: { url: string; title: string }[]) => {
+  parentBooks.map(async (parentBook) => {
+    const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBook.url);
+    if (!AxiosResponse) return;
+    const $ = cheerioLoadWrapper(AxiosResponse.data);
+    let $ul = $('a.chapterTitle');
+  });
+   
+  const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBooks[0].url);
+  if (!AxiosResponse) return;
+  const $ = cheerioLoadWrapper(AxiosResponse.data);
+  let $ul = $('a.chapterTitle');
 
+  const linksArr: { url: string; title: string }[] = [];
 
+  $ul.map((i, child) => {
+    const linkObj = { url: child.attribs.href, title: child.firstChild.data };
+    linksArr.push(linkObj);
+  });
 
-
-
-  // const $ = cheerio.load(AxiosResponse.data);
-  // const tables = $("table");
-
-  // const linksArr: { url: string; title: string }[] = [];
-
-  // tables.each((i, table) => {
-  //   if (i === 2) {
-  //     const links = $(table).find("a");
-  //     links.each((i, link) => {
-  //       const url = $(link).attr("href");
-  //       const title = $(link).text();
-
-  //       if (url && url.endsWith(".html")) {
-  //         const linkObj = {
-  //           url,
-  //           title
-  //         };
-
-  //         linksArr.push(linkObj);
-  //       }
-  //     });
-  //   }
-  // });
-
-  // return linksArr;
+  return linksArr;
 }
 
 /***
@@ -132,6 +119,6 @@ const getChapterVerses = async (book: string, chapter: number) => {
 }
 
 (async () => {
-  const links = await getBookLinks();
+  const links = await getParentBookLinks();
   console.log(links);
 } )();
