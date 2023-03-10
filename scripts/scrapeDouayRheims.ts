@@ -4,7 +4,7 @@ import * as cheerio from "cheerio";
 import fs from "fs";
 import { encode } from "gpt-3-encoder";
 
-const BASE_URL = "https://catechismclass.com/my_bible.php/";
+const BASE_URL = "https://catechismclass.com/";
 const HOME_PAGE_SUFFIX = "my_bible.php";
 const CHUNK_SIZE = 200;
 
@@ -59,40 +59,45 @@ const getParentBookLinks = async () => {
   const $ = cheerioLoadWrapper(AxiosResponse.data);
   let $ul = $('a.chapterTitle');
 
-  const linksArr: { url: string; title: string }[] = [];
+  const links: { url: string; title: string }[] = [];
 
   $ul.map((i, child) => {
-    const linkObj = { url: child.attribs.href, title: child.firstChild.data };
-    linksArr.push(linkObj);
+    const linkObj = { url: child.attribs.href, title: child?.firstChild?.data };
+    links.push(linkObj);
   });
 
-  return linksArr;
+  return links;
+}
+
+interface ChapterLinks {
+  chapterTitle: string;
+  chapters: { url: string; title: string }[];
 }
 
 /**
  * create an asynchroneous function that returns the books and the links to thier chapters
  */
 const getBookLinks = async (parentBooks: { url: string; title: string }[]) => {
-  parentBooks.map(async (parentBook) => {
+
+  const bookLinks: ChapterLinks[] = [];
+
+  const test = await Promise.all(parentBooks.map(async (parentBook) => {
     const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBook.url);
+    // console.log(parentBook.url);
     if (!AxiosResponse) return;
     const $ = cheerioLoadWrapper(AxiosResponse.data);
-    let $ul = $('a.chapterTitle');
-  });
-   
-  const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBooks[0].url);
-  if (!AxiosResponse) return;
-  const $ = cheerioLoadWrapper(AxiosResponse.data);
-  let $ul = $('a.chapterTitle');
-
-  const linksArr: { url: string; title: string }[] = [];
-
-  $ul.map((i, child) => {
-    const linkObj = { url: child.attribs.href, title: child.firstChild.data };
-    linksArr.push(linkObj);
-  });
-
-  return linksArr;
+    let $li = $('li > strong');
+    let $liChildren = $li.children();
+    // console.log($liChildren.prevObject.length);
+    $liChildren.prevObject?.each((i, child) => {
+      let chLinks = {} as ChapterLinks;
+      // console.log(child.children[0].data);
+      chLinks.chapterTitle = child.children[0].data;
+      bookLinks.push(chLinks);
+    });
+    return bookLinks;
+  }));
+  return test;
 }
 
 /***
@@ -120,5 +125,6 @@ const getChapterVerses = async (book: string, chapter: number) => {
 
 (async () => {
   const links = await getParentBookLinks();
-  console.log(links);
+  let bLinks = await getBookLinks(links);
+  console.log(bLinks);
 } )();
