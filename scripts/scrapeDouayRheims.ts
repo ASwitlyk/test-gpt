@@ -80,24 +80,43 @@ interface ChapterLinks {
 const getBookLinks = async (parentBooks: { url: string; title: string }[]) => {
 
   const bookLinks: ChapterLinks[] = [];
+  let count = 0;
 
-  const test = await Promise.all(parentBooks.map(async (parentBook) => {
+  await Promise.all(parentBooks.map(async (parentBook) => {
+    // get the html from the parent book
     const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBook.url);
-    // console.log(parentBook.url);
+
     if (!AxiosResponse) return;
     const $ = cheerioLoadWrapper(AxiosResponse.data);
-    let $li = $('li > strong');
-    let $liChildren = $li.children();
-    // console.log($liChildren.prevObject.length);
+    const $li = $('li > strong');
+    const $liChildren = $li.children();
+    // iterate over the children - here in catechismclass.com/bible/<book> the children w/ this selector
+    // are the <li class="chapterTitle"> elements
     $liChildren.prevObject?.each((i, child) => {
-      let chLinks = {} as ChapterLinks;
-      // console.log(child.children[0].data);
+      const chLinks = {} as ChapterLinks;
+      // get the chapter title
+      // First child is the <strong> element w/ the book names
       chLinks.chapterTitle = child.children[0].data;
+      // initialize the chapters array
+      chLinks.chapters = [];
       bookLinks.push(chLinks);
+      // get the chapters and their links - find the <ul> element w/ class chapter
+      // then iterate over the <li> elements to get the links and and chapter titles
+
+      // chapters is all the <li> elements in the <ul> element w/ class chapter
+      const chapters = child.next.next.next.next.children;
+
+      chapters.forEach((chapter) => {
+
+        const chapterLink = {
+          url: chapter.children[0].attribs.href,
+          title: chapter.children[0].children[0].data,
+        };
+        chLinks.chapters.push(chapterLink);
+      });
     });
-    return bookLinks;
   }));
-  return test;
+  return bookLinks;
 }
 
 /***
@@ -125,6 +144,7 @@ const getChapterVerses = async (book: string, chapter: number) => {
 
 (async () => {
   const links = await getParentBookLinks();
+  // console.log(links);
   let bLinks = await getBookLinks(links);
-  console.log(bLinks);
+  console.log(JSON.stringify(bLinks));
 } )();
