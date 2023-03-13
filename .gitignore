@@ -37,3 +37,9 @@ next-env.d.ts
 
 # tsn
 tsn.json
+
+# json files created
+/scripts/*.json
+
+# logs
+*.log

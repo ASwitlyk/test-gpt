@@ -6,20 +6,32 @@ export enum OpenAIModel {
 
 export type BibleBook = {
     book: string;
-    chapter: number;
-    verse: number;
-    text: string;
+    chapters: BibleBookChapter[];
 };
 
-export type BibleBookChunk = {
+export type BibleBookChapter = {
+    book: string;
+    chapterUrl: string;
+    chapter: number;
+    verses: BibleBookVerse[];
+}
+
+// export type BibleBookChunk = {
+//     book: string;
+//     chapter: number;
+//     verse: number;
+//     chapter_url: string;
+//     content: string;
+//     content_length: number;
+//     content_tokens: number;
+//     embedding: number[];
+// }
+
+export type BibleBookVerse = {
     book: string;
     chapter: number;
     verse: number;
-    chapter_url: string;
-    content: string;
-    content_length: number;
-    content_tokens: number;
-    embedding: number[];
+    text: string;
 }
 
 export type BibleJSON = {

@@ -1,12 +1,32 @@
-import { BibleBook, BibleBookChunk, BibleJSON } from "@/types/douayRheims";
+import { BibleBook, BibleBookChapter, BibleBookVerse, BibleJSON } from "@/types/douayRheims";
 import axios, { AxiosError } from "axios";
 import * as cheerio from "cheerio";
 import fs from "fs";
 import { encode } from "gpt-3-encoder";
+// import winston from "winston/lib/winston/config";
+import winston from "winston";
 
 const BASE_URL = "https://catechismclass.com/";
 const HOME_PAGE_SUFFIX = "my_bible.php";
+const BOOKS_PAGE_SUFFIX = "bible/";
 const CHUNK_SIZE = 200;
+
+
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.json(),
+  defaultMeta: { service: 'user-service' },
+  transports: [
+    //
+    // - Write to all logs with level `info` and below to `combined.log`
+    // - Write all logs error (and below) to `error.log`.
+    //
+    new winston.transports.File({ filename: 'error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'combined.log' })
+  ],
+});
+
+
 
 
 /**
@@ -22,16 +42,22 @@ const axiosErrorHandler = (error: AxiosError) => {
 const axiosErrorHandlerWrapper = (error) => {
   if (error instanceof AxiosError) {
     axiosErrorHandler(error);
+    logger.error(error);
   } else {
-    console.error(error);
+    logger.error(error);
+    // console.error(error);
   }
 }
 
 /**
- * Axios get request wrapper
+ * Axios get request wrapper with delay option
  */
-const axiosGetWrapper = async (url: string) => {
+const axiosGetWrapper = async (url: string, delay?: number) => {
   try {
+    if (delay) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      console.log('delayed: ' + delay + 'ms');
+    }
     const AxiosResponse = await axios.get(url);
     return AxiosResponse;
   } catch (error) {
@@ -54,7 +80,7 @@ const cheerioLoadWrapper = (html: string) => {
  * from the catechismclass.com website
  */
 const getParentBookLinks = async () => {
-  const AxiosResponse = await axiosGetWrapper(BASE_URL + HOME_PAGE_SUFFIX);
+  const AxiosResponse = await axiosGetWrapper(BASE_URL + HOME_PAGE_SUFFIX, 100);
   if (!AxiosResponse) return;
   const $ = cheerioLoadWrapper(AxiosResponse.data);
   let $ul = $('a.chapterTitle');
@@ -81,10 +107,11 @@ const getBookLinks = async (parentBooks: { url: string; title: string }[]) => {
 
   const bookLinks: ChapterLinks[] = [];
   let count = 0;
-
+  let delay = 100;
   await Promise.all(parentBooks.map(async (parentBook) => {
     // get the html from the parent book
-    const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBook.url);
+    delay += 100;
+    const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBook.url, delay);
 
     if (!AxiosResponse) return;
     const $ = cheerioLoadWrapper(AxiosResponse.data);
@@ -119,32 +146,98 @@ const getBookLinks = async (parentBooks: { url: string; title: string }[]) => {
   return bookLinks;
 }
 
-/***
- * create an asynchroneous function that returns the number of chapters in a book from the
- * catechismclass.com website
- */
-const getChapterCount = async (book: string) => {
-
-}
-
 /**
- * create an asynchroneous function that returns the chapter page from the catechismclass.com website
+ * create an asynchroneous function that returns the chapter and verse from each book and the text
+ * of that verse
  */
-const getChapterPage = async (book: string, chapter: number) => {
+const getBookChapterVerse = async (bookLinks: ChapterLinks[]) => {
+  // iterate over the ChapterLinks array
+  // for each ChapterLinks object, iterate over the chapters array
+  // for each chapter, get the html from the chapter url
+  // then iterate over the <p> elements to get the chapter and verse
+  // and the text of that verse
 
-}
+  // initialize the bible object and populate
+  const bible = {} as BibleJSON;
+  bible.books = [];
 
-/**
- * create an asynchroneous function that scrapes the verses in each chapter of a book from the
- * catechismclass.com website
- */
-const getChapterVerses = async (book: string, chapter: number) => {
   
-}
+  const books: BibleBook[] = [];
+  let msDelay = 0;
+  await Promise.all(bookLinks.map(async (bookLink) => {
+    // start scrape of each book and initialize the book object
+    const book = {} as BibleBook;
+    book.title = bookLink.chapterTitle;
+    book.chapters = [];
+    await Promise.all(bookLink.chapters.map(async (chapter) => {
+      // go to each chapter in the subject book
+      let url = BASE_URL + BOOKS_PAGE_SUFFIX + chapter.url;
+      // add a delay to prevent the server from blocking the request
+      console.log('msDelay: ', msDelay);
+      msDelay += 25;
+      const AxiosResponse = await axiosGetWrapper(BASE_URL + BOOKS_PAGE_SUFFIX + chapter.url, msDelay);
+
+
+      if (!AxiosResponse) return;
+      const bookChapter = {} as BibleBookChapter;
+      bookChapter.book = book.title;
+      bookChapter.chapterUrl = url;
+      bookChapter.chapter = Number.parseInt(url.match(/[0-9]{2}/g)[0]);
+      bookChapter.verses = [];
+      const $ = cheerioLoadWrapper(AxiosResponse.data);
+      const $p = $('p');
+      $p.each((i, child) => {
+        // scrape chapter, verse and text
+        if (child.children.length === 2) {
+          const bookVerse = {} as BibleBookVerse;
+          // console.log(child.children[0].children[0].data);
+          let verseChapter = child.children[0].children[0].data;
+          let splitBookVerse = verseChapter.split(" ");
+          let chapterVerse = splitBookVerse[1];
+          let chapter = chapterVerse.split(":")[0];
+          let verse = chapterVerse.split(":")[1];
+          bookVerse.verse = Number.parseInt(verse);
+          bookVerse.chapter = Number.parseInt(chapter);
+          bookVerse.text= child.children[1].data;
+          bookVerse.book = book.title;
+          bookChapter.verses.push(bookVerse);
+        }
+      });
+      book.chapters.push(bookChapter);
+    }));
+    bible.books.push(book);
+  }));
+  return bible;
+};
+
+
+const mockedBlink = [
+  {
+    chapterTitle: "Genesis",
+    chapters: [
+      {
+        url: "torah/genesis_01.php",
+        title: "Genesis 1",
+      },
+      {
+        url: "torah/genesis_02.php",
+        title: "Genesis 2",
+      }]
+  }];
 
 (async () => {
   const links = await getParentBookLinks();
   // console.log(links);
   let bLinks = await getBookLinks(links);
-  console.log(JSON.stringify(bLinks));
-} )();
+  // console.log(JSON.stringify(bLinks));
+  // const bible = await getBookChapterVerse(mockedBlink);
+  const bible = await getBookChapterVerse(bLinks);
+  // console.log(bible);
+  // console.log(JSON.stringify(bible));
+
+  // write the bible object to a json file
+  fs.writeFile('scripts/bible3.json', JSON.stringify(bible), (err) => {
+    if (err) throw err;
+    console.log('The file has been saved!');
+  });
+})();
