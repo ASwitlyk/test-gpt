@@ -5,11 +5,17 @@ import fs from "fs";
 import { encode } from "gpt-3-encoder";
 // import winston from "winston/lib/winston/config";
 import winston from "winston";
+import pThrottle from "p-throttle";
 
 const BASE_URL = "https://catechismclass.com/";
 const HOME_PAGE_SUFFIX = "my_bible.php";
 const BOOKS_PAGE_SUFFIX = "bible/";
-const CHUNK_SIZE = 200;
+const CHUNK_SIZE = 1000;
+
+const throttle = pThrottle({
+  limit: 2,
+  interval: 300
+});
 
 
 const logger = winston.createLogger({
@@ -78,6 +84,7 @@ const cheerioLoadWrapper = (html: string) => {
 /**
  * create an asynchroneous function that returns an array of Parent Books and their links
  * from the catechismclass.com website
+ * it makes one async call so no need to throttle
  */
 const getParentBookLinks = async () => {
   const AxiosResponse = await axiosGetWrapper(BASE_URL + HOME_PAGE_SUFFIX, 100);
@@ -103,59 +110,168 @@ interface ChapterLinks {
 /**
  * create an asynchroneous function that returns the books and the links to thier chapters
  */
-const getBookLinks = async (parentBooks: { url: string; title: string }[]) => {
+// const getBookLinks = async (parentBooks: { url: string; title: string }[]) => {
+
+//   const bookLinks: ChapterLinks[] = [];
+
+//   await Promise.all(parentBooks.map(async (parentBook) => {
+//     // get the html from the parent book
+//     const AxiosResponse = await axios.get(BASE_URL + parentBook.url);
+
+//     if (!AxiosResponse) return;
+//     const $ = cheerioLoadWrapper(AxiosResponse.data);
+//     const $li = $('li > strong');
+//     const $liChildren = $li.children();
+//     // iterate over the children - here in catechismclass.com/bible/<book> the children w/ this selector
+//     // are the <li class="chapterTitle"> elements
+//     $liChildren.prevObject?.each((i, child) => {
+//       const chLinks = {} as ChapterLinks;
+//       // get the chapter title
+//       // First child is the <strong> element w/ the book names
+//       chLinks.chapterTitle = child.children[0].data;
+//       // initialize the chapters array
+//       chLinks.chapters = [];
+//       bookLinks.push(chLinks);
+//       // get the chapters and their links - find the <ul> element w/ class chapter
+//       // then iterate over the <li> elements to get the links and and chapter titles
+
+//       // chapters is all the <li> elements in the <ul> element w/ class chapter
+//       const chapters = child.next.next.next.next.children;
+
+//       chapters.forEach((chapter) => {
+
+//         const chapterLink = {
+//           url: chapter.children[0].attribs.href,
+//           title: chapter.children[0].children[0].data,
+//         };
+//         chLinks.chapters.push(chapterLink);
+//       });
+//     });
+//   }));
+
+//   return bookLinks;
+// }
+
+/**
+ * Get book links helper function which extracts the async function inside the 
+ * getBookLinks parentBook.map method
+ */
+const extractChapterLinks = throttle(async (parentBook: { url: string; title: string }, bookLinks: ChapterLinks[]) => {
+  const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBook.url);
+  if (!AxiosResponse) return;
+  const $ = cheerioLoadWrapper(AxiosResponse.data);
+  const $li = $('li > strong');
+  const $liChildren = $li.children();
+  // iterate over the children - here in catechismclass.com/bible/<book> the children w/ this selector
+  // are the <li class="chapterTitle"> elements
+  $liChildren.prevObject?.each((i, child) => {
+    const chLinks = {} as ChapterLinks;
+    // get the chapter title
+    // First child is the <strong> element w/ the book names
+    chLinks.chapterTitle = child.children[0].data;
+    // initialize the chapters array
+    chLinks.chapters = [];
+    bookLinks.push(chLinks);
+    // get the chapters and their links - find the <ul> element w/ class chapter
+    // then iterate over the <li> elements to get the links and and chapter titles
+
+    // chapters is all the <li> elements in the <ul> element w/ class chapter
+    const chapters = child.next.next.next.next.children;
+
+    chapters.forEach((chapter) => {
+
+      const chapterLink = {
+        url: chapter.children[0].attribs.href,
+        title: chapter.children[0].children[0].data,
+      };
+      chLinks.chapters.push(chapterLink);
+    });
+  });
+});
+
+/**
+ * An asynchroneous function that returns the books and the links to thier chapters
+ * @param parentBooks 
+ * @returns 
+ */
+const getBookLinksGPT = async (parentBooks: { url: string; title: string }[]) => {
 
   const bookLinks: ChapterLinks[] = [];
-  let count = 0;
-  let delay = 100;
+
   await Promise.all(parentBooks.map(async (parentBook) => {
     // get the html from the parent book
-    delay += 100;
-    const AxiosResponse = await axiosGetWrapper(BASE_URL + parentBook.url, delay);
-
-    if (!AxiosResponse) return;
-    const $ = cheerioLoadWrapper(AxiosResponse.data);
-    const $li = $('li > strong');
-    const $liChildren = $li.children();
-    // iterate over the children - here in catechismclass.com/bible/<book> the children w/ this selector
-    // are the <li class="chapterTitle"> elements
-    $liChildren.prevObject?.each((i, child) => {
-      const chLinks = {} as ChapterLinks;
-      // get the chapter title
-      // First child is the <strong> element w/ the book names
-      chLinks.chapterTitle = child.children[0].data;
-      // initialize the chapters array
-      chLinks.chapters = [];
-      bookLinks.push(chLinks);
-      // get the chapters and their links - find the <ul> element w/ class chapter
-      // then iterate over the <li> elements to get the links and and chapter titles
-
-      // chapters is all the <li> elements in the <ul> element w/ class chapter
-      const chapters = child.next.next.next.next.children;
-
-      chapters.forEach((chapter) => {
-
-        const chapterLink = {
-          url: chapter.children[0].attribs.href,
-          title: chapter.children[0].children[0].data,
-        };
-        chLinks.chapters.push(chapterLink);
-      });
-    });
+    await extractChapterLinks(parentBook, bookLinks);
   }));
   return bookLinks;
-}
+};
+
+
+
 
 /**
  * create an asynchroneous function that returns the chapter and verse from each book and the text
  * of that verse
  */
-const getBookChapterVerse = async (bookLinks: ChapterLinks[]) => {
-  // iterate over the ChapterLinks array
-  // for each ChapterLinks object, iterate over the chapters array
-  // for each chapter, get the html from the chapter url
-  // then iterate over the <p> elements to get the chapter and verse
-  // and the text of that verse
+// const getBookChapterVerse = async (bookLinks: ChapterLinks[]) => {
+
+//   // initialize the bible object and populate
+//   const bible = {} as BibleJSON;
+//   bible.books = [];
+
+  
+//   const books: BibleBook[] = [];
+
+//   await Promise.all(bookLinks.map(async (bookLink) => {
+//     // start scrape of each book and initialize the book object
+//     const book = {} as BibleBook;
+//     book.title = bookLink.chapterTitle;
+//     book.chapters = [];
+//     await Promise.all(bookLink.chapters.map(async (chapter) => {
+//       // go to each chapter in the subject book
+//       let url = BASE_URL + BOOKS_PAGE_SUFFIX + chapter.url;
+
+//       const AxiosResponse = await axios.get(BASE_URL + BOOKS_PAGE_SUFFIX + chapter.url);
+
+
+//       if (!AxiosResponse) return;
+//       const bookChapter = {} as BibleBookChapter;
+//       bookChapter.book = book.title;
+//       bookChapter.chapterUrl = url;
+//       bookChapter.chapter = Number.parseInt(url.match(/[0-9]{2}/g)[0]);
+//       bookChapter.verses = [];
+//       const $ = cheerioLoadWrapper(AxiosResponse.data);
+//       const $p = $('p');
+//       $p.each((i, child) => {
+//         // scrape chapter, verse and text
+//         if (child.children.length === 2) {
+//           const bookVerse = {} as BibleBookVerse;
+//           // console.log(child.children[0].children[0].data);
+//           let verseChapter = child.children[0].children[0].data;
+//           let splitBookVerse = verseChapter.split(" ");
+//           let chapterVerse = splitBookVerse[1];
+//           let chapter = chapterVerse.split(":")[0];
+//           let verse = chapterVerse.split(":")[1];
+//           bookVerse.verse = Number.parseInt(verse);
+//           bookVerse.chapter = Number.parseInt(chapter);
+//           bookVerse.text= child.children[1].data;
+//           bookVerse.book = book.title;
+//           bookChapter.verses.push(bookVerse);
+//         }
+//       });
+//       book.chapters.push(bookChapter);
+//     }));
+//     bible.books.push(book);
+//   }));
+//   return bible;
+// };
+
+
+
+/**
+ * create an asynchroneous function that returns the chapter and verse from each book and the text
+ * of that verse
+ */
+const getBookChapterVerseGPT = async (bookLinks: ChapterLinks[]) => {
 
   // initialize the bible object and populate
   const bible = {} as BibleJSON;
@@ -163,53 +279,57 @@ const getBookChapterVerse = async (bookLinks: ChapterLinks[]) => {
 
   
   const books: BibleBook[] = [];
-  let msDelay = 0;
+
   await Promise.all(bookLinks.map(async (bookLink) => {
     // start scrape of each book and initialize the book object
     const book = {} as BibleBook;
     book.title = bookLink.chapterTitle;
     book.chapters = [];
     await Promise.all(bookLink.chapters.map(async (chapter) => {
-      // go to each chapter in the subject book
-      let url = BASE_URL + BOOKS_PAGE_SUFFIX + chapter.url;
-      // add a delay to prevent the server from blocking the request
-      console.log('msDelay: ', msDelay);
-      msDelay += 25;
-      const AxiosResponse = await axiosGetWrapper(BASE_URL + BOOKS_PAGE_SUFFIX + chapter.url, msDelay);
-
-
-      if (!AxiosResponse) return;
-      const bookChapter = {} as BibleBookChapter;
-      bookChapter.book = book.title;
-      bookChapter.chapterUrl = url;
-      bookChapter.chapter = Number.parseInt(url.match(/[0-9]{2}/g)[0]);
-      bookChapter.verses = [];
-      const $ = cheerioLoadWrapper(AxiosResponse.data);
-      const $p = $('p');
-      $p.each((i, child) => {
-        // scrape chapter, verse and text
-        if (child.children.length === 2) {
-          const bookVerse = {} as BibleBookVerse;
-          // console.log(child.children[0].children[0].data);
-          let verseChapter = child.children[0].children[0].data;
-          let splitBookVerse = verseChapter.split(" ");
-          let chapterVerse = splitBookVerse[1];
-          let chapter = chapterVerse.split(":")[0];
-          let verse = chapterVerse.split(":")[1];
-          bookVerse.verse = Number.parseInt(verse);
-          bookVerse.chapter = Number.parseInt(chapter);
-          bookVerse.text= child.children[1].data;
-          bookVerse.book = book.title;
-          bookChapter.verses.push(bookVerse);
-        }
-      });
-      book.chapters.push(bookChapter);
+      await scrapeChapter(book, chapter);
     }));
     bible.books.push(book);
   }));
   return bible;
 };
 
+
+/**
+ * scrape chapter helper
+ */
+const scrapeChapter = throttle(async (book: BibleBook, chapter: any) => {
+  // go to each chapter in the subject book
+  let url = BASE_URL + BOOKS_PAGE_SUFFIX + chapter.url;
+
+  const AxiosResponse = await axiosGetWrapper(BASE_URL + BOOKS_PAGE_SUFFIX + chapter.url);
+
+  if (!AxiosResponse) return;
+
+  const bookChapter = {} as BibleBookChapter;
+  bookChapter.book = book.title;
+  bookChapter.chapterUrl = url;
+  bookChapter.chapter = Number.parseInt(url.match(/[0-9]{2}/g)[0]);
+  bookChapter.verses = [];
+  const $ = cheerioLoadWrapper(AxiosResponse.data);
+  const $p = $('p');
+  $p.each((i, child) => {
+    // scrape chapter, verse and text
+    if (child.children.length === 2) {
+      const bookVerse = {} as BibleBookVerse;
+      let verseChapter = child.children[0].children[0].data;
+      let splitBookVerse = verseChapter.split(" ");
+      let chapterVerse = splitBookVerse[1];
+      let chapter = chapterVerse.split(":")[0];
+      let verse = chapterVerse.split(":")[1];
+      bookVerse.verse = Number.parseInt(verse);
+      bookVerse.chapter = Number.parseInt(chapter);
+      bookVerse.text= child.children[1].data;
+      bookVerse.book = book.title;
+      bookChapter.verses.push(bookVerse);
+    }
+  });
+  book.chapters.push(bookChapter);
+});
 
 const mockedBlink = [
   {
@@ -228,15 +348,23 @@ const mockedBlink = [
 (async () => {
   const links = await getParentBookLinks();
   // console.log(links);
-  let bLinks = await getBookLinks(links);
+  // let bLinks = await getBookLinks(links);
+
+  let bLinks = await getBookLinksGPT(links);
+  // console.log(bLinks);
   // console.log(JSON.stringify(bLinks));
-  // const bible = await getBookChapterVerse(mockedBlink);
-  const bible = await getBookChapterVerse(bLinks);
+  // const bible = await getBookChapterVerseGPT(mockedBlink);
+  // console.log(bible);
+
+  // UNCOMMENT THIS LINE TO GET THE BIBLE
+  // const bible = await getBookChapterVerse(bLinks);
+  const bible = await getBookChapterVerseGPT(bLinks);
+
   // console.log(bible);
   // console.log(JSON.stringify(bible));
 
   // write the bible object to a json file
-  fs.writeFile('scripts/bible3.json', JSON.stringify(bible), (err) => {
+  fs.writeFile('scripts/bible.json', JSON.stringify(bible), (err) => {
     if (err) throw err;
     console.log('The file has been saved!');
   });
