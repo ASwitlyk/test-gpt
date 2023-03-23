@@ -14,7 +14,7 @@ const CHUNK_SIZE = 1000;
 
 const throttle = pThrottle({
   limit: 2,
-  interval: 300
+  interval: 1000
 });
 
 
@@ -62,7 +62,6 @@ const axiosGetWrapper = async (url: string, delay?: number) => {
   try {
     if (delay) {
       await new Promise((resolve) => setTimeout(resolve, delay));
-      console.log('delayed: ' + delay + 'ms');
     }
     const AxiosResponse = await axios.get(url);
     return AxiosResponse;
@@ -323,7 +322,12 @@ const scrapeChapter = throttle(async (book: BibleBook, chapter: any) => {
       let verse = chapterVerse.split(":")[1];
       bookVerse.verse = Number.parseInt(verse);
       bookVerse.chapter = Number.parseInt(chapter);
-      bookVerse.text= child.children[1].data;
+
+      let trimmedText = child.children[1].data.trim();
+
+      bookVerse.text= trimmedText;
+      bookVerse.text_length = trimmedText.length;
+      bookVerse.text_tokens = encode(trimmedText).length;
       bookVerse.book = book.title;
       bookChapter.verses.push(bookVerse);
     }
@@ -364,7 +368,7 @@ const mockedBlink = [
   // console.log(JSON.stringify(bible));
 
   // write the bible object to a json file
-  fs.writeFile('scripts/bible.json', JSON.stringify(bible), (err) => {
+  fs.writeFile('scripts/bible3.json', JSON.stringify(bible), (err) => {
     if (err) throw err;
     console.log('The file has been saved!');
   });
